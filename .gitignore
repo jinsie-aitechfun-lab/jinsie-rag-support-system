@@ -1,0 +1,77 @@
+# =========================
+# Python / FastAPI / AI Project
+# =========================
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+*.egg-info/
+
+# =========================
+# IDE / Editor
+# =========================
+
+# VS Code (selective)
+.vscode/*
+!.vscode/settings.json
+
+# JetBrains
+.idea/
+
+# Editor temp files
+*.swp
+*.swo
+
+# =========================
+# Logs & temp files
+# =========================
+logs/
+*.log
+tmp/
+temp/
+
+# =========================
+# Environment variables (secrets)
+# =========================
+.env
+.env.*
+!.env.example
+
+# =========================
+# Build artifacts
+# =========================
+dist/
+build/
+site/
+
+# =========================
+# Jupyter
+# =========================
+.ipynb_checkpoints/
+
+# =========================
+# Data / Models (optional)
+# =========================
+data/
+datasets/
+checkpoints/
+models/
+
+# =========================
+# Private docs
+# =========================
+docs-private/
+
+# =========================
+# OS files
+# =========================
+.DS_Store
+Thumbs.db
+desktop.ini
