@@ -6,6 +6,8 @@ from pydantic import BaseModel
 import jinsie_agent_platform as platform
 from jinsie_agent_platform.runner import workflow_runner
 
+from app.rag.retriever import format_context, keyword_retrieve
+
 app = FastAPI(title="Jinsie RAG Support System")
 
 
@@ -28,11 +30,29 @@ def _platform_prompt_path() -> str:
     return str(prompt)
 
 
+def _augment_query_with_context(query: str) -> str:
+    """
+    MVP: keyword retrieve -> build context -> prepend to query
+    """
+    docs = keyword_retrieve(query, top_k=3)
+    context = format_context(docs)
+    if not context:
+        return query
+
+    return (
+        "你将获得一段检索到的上下文，请优先基于上下文完成任务。\n\n"
+        f"【上下文】\n{context}\n\n"
+        f"【用户问题】\n{query}"
+    )
+
+
 @app.post("/v1/rag/run")
 def rag_run(req: RagRunRequest):
     try:
+        augmented = _augment_query_with_context(req.query)
+
         result = workflow_runner(
-            req.query,
+            augmented,
             debug=False,
             prompt_path=_platform_prompt_path(),
         )
