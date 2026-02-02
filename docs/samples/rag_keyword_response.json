@@ -1,0 +1,25 @@
+{
+    "answer": {
+        "task_status": "COMPLETED",
+        "stats": {
+            "total_steps": 3,
+            "ok": 3,
+            "skipped": 0,
+            "failed": 0,
+            "degraded_count": 0
+        },
+        "last_step_id": "step_3",
+        "tool": "echo_tool",
+        "output": {
+            "echo": "\u8fd9\u4e2a\u4ed3\u5e93\u7684 keyword RAG \u80fd\u529b\u662f\u652f\u6301\u5173\u952e\u8bcd\u68c0\u7d22\u3001Agent \u63a8\u7406\u3001\u591a\u6b65\u5de5\u5177\u8c03\u7528\u548c\u53ef\u6269\u5c55\u4e3a\u5411\u91cf\u53ec\u56de\u3002\u4f9d\u636e\uff1a\u652f\u6301\uff1a- \u5173\u952e\u8bcd\u68c0\u7d22- Agent \u63a8\u7406- \u591a\u6b65\u5de5\u5177\u8c03\u7528- \u53ef\u6269\u5c55\u4e3a\u5411\u91cf\u53ec\u56de"
+        }
+    },
+    "retrieval": {
+        "mode": "keyword",
+        "hit_count": 1,
+        "doc_ids": [
+            "md_1"
+        ]
+    }
+}
+
