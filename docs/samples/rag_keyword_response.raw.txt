@@ -1,0 +1,1 @@
+{"answer":{"task_status":"COMPLETED","stats":{"total_steps":3,"ok":3,"skipped":0,"failed":0,"degraded_count":0},"last_step_id":"step_3","tool":"echo_tool","output":{"echo":"这个仓库的 keyword RAG 能力是支持关键词检索、Agent 推理、多步工具调用和可扩展为向量召回。依据：支持：- 关键词检索- Agent 推理- 多步工具调用- 可扩展为向量召回"}},"retrieval":{"mode":"keyword","hit_count":1,"doc_ids":["md_1"]}}
