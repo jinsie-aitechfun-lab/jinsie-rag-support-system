@@ -1,25 +1,98 @@
 {
     "answer": {
-        "task_status": "COMPLETED",
-        "stats": {
-            "total_steps": 3,
-            "ok": 3,
-            "skipped": 0,
-            "failed": 0,
-            "degraded_count": 0
-        },
-        "last_step_id": "step_3",
-        "tool": "echo_tool",
-        "output": {
-            "echo": "\u8fd9\u4e2a\u4ed3\u5e93\u7684 keyword RAG \u80fd\u529b\u662f\u652f\u6301\u5173\u952e\u8bcd\u68c0\u7d22\u3001Agent \u63a8\u7406\u3001\u591a\u6b65\u5de5\u5177\u8c03\u7528\u548c\u53ef\u6269\u5c55\u4e3a\u5411\u91cf\u53ec\u56de\u3002\u4f9d\u636e\uff1a\u652f\u6301\uff1a- \u5173\u952e\u8bcd\u68c0\u7d22- Agent \u63a8\u7406- \u591a\u6b65\u5de5\u5177\u8c03\u7528- \u53ef\u6269\u5c55\u4e3a\u5411\u91cf\u53ec\u56de"
-        }
+        "task_summary": "\u8bf4\u660e\u4ed3\u5e93\u7684 keyword RAG \u80fd\u529b\u5e76\u63d0\u4f9b\u4f9d\u636e",
+        "assumptions": [
+            "\u7528\u6237\u5e0c\u671b\u4e86\u89e3 keyword \u68c0\u7d22\u6a21\u5f0f\u7684\u5177\u4f53\u5e94\u7528"
+        ],
+        "risks": [
+            "\u53ef\u80fd\u9700\u8981\u8fdb\u4e00\u6b65\u6f84\u6e05\u7528\u6237\u5bf9 RAG \u80fd\u529b\u7684\u5177\u4f53\u9700\u6c42"
+        ],
+        "steps": [
+            {
+                "step_id": "step_1",
+                "title": "\u63d0\u53d6 keyword \u68c0\u7d22\u6a21\u5f0f\u7684\u63cf\u8ff0",
+                "description": "\u4ece\u6587\u6863 retrieval_modes \u4e2d\u63d0\u53d6 keyword \u68c0\u7d22\u6a21\u5f0f\u7684\u63cf\u8ff0\u3002",
+                "dependencies": [],
+                "deliverable": "keyword \u68c0\u7d22\u6a21\u5f0f\u7684\u63cf\u8ff0",
+                "acceptance": "\u63cf\u8ff0\u5305\u542b\u5173\u952e\u8bcd\u68c0\u7d22\u6a21\u5f0f\u7684\u57fa\u672c\u4fe1\u606f",
+                "tool": {
+                    "name": "echo_tool",
+                    "args": {
+                        "text": "\u4ece\u6587\u6863 retrieval_modes \u4e2d\u63d0\u53d6 keyword \u68c0\u7d22\u6a21\u5f0f\u7684\u63cf\u8ff0\u3002"
+                    }
+                }
+            },
+            {
+                "step_id": "step_2",
+                "title": "\u603b\u7ed3 keyword RAG \u80fd\u529b",
+                "description": "\u57fa\u4e8e\u63d0\u53d6\u7684\u63cf\u8ff0\uff0c\u603b\u7ed3 keyword RAG \u80fd\u529b\u3002",
+                "dependencies": [
+                    "step_1"
+                ],
+                "deliverable": "keyword RAG \u80fd\u529b\u7684\u603b\u7ed3",
+                "acceptance": "\u603b\u7ed3\u5305\u542b\u5173\u952e\u8bcd\u68c0\u7d22\u6a21\u5f0f\u7684\u57fa\u672c\u4fe1\u606f\uff0c\u5e76\u8bf4\u660e\u5176\u5728 RAG \u4e2d\u7684\u5e94\u7528",
+                "tool": {
+                    "name": "echo_tool",
+                    "args": {
+                        "text": "\u57fa\u4e8e\u63d0\u53d6\u7684\u63cf\u8ff0\uff0c\u603b\u7ed3 keyword RAG \u80fd\u529b\u3002"
+                    }
+                }
+            }
+        ],
+        "execution_results": [
+            {
+                "step_id": "step_1",
+                "tool": "echo_tool",
+                "ok": true,
+                "skipped": false,
+                "reason": null,
+                "degraded": false,
+                "degraded_reason": null,
+                "degraded_from": null,
+                "output": {
+                    "echo": "\u4ece\u6587\u6863 retrieval_modes \u4e2d\u63d0\u53d6 keyword \u68c0\u7d22\u6a21\u5f0f\u7684\u63cf\u8ff0\u3002"
+                }
+            },
+            {
+                "step_id": "step_2",
+                "tool": "echo_tool",
+                "ok": true,
+                "skipped": false,
+                "reason": null,
+                "degraded": false,
+                "degraded_reason": null,
+                "degraded_from": null,
+                "output": {
+                    "echo": "\u57fa\u4e8e\u63d0\u53d6\u7684\u63cf\u8ff0\uff0c\u603b\u7ed3 keyword RAG \u80fd\u529b\u3002"
+                }
+            },
+            {
+                "step_id": "__meta__",
+                "tool": null,
+                "ok": true,
+                "skipped": false,
+                "reason": null,
+                "task_status": "COMPLETED",
+                "stats": {
+                    "total_steps": 2,
+                    "ok": 2,
+                    "skipped": 0,
+                    "failed": 0,
+                    "degraded_count": 0
+                },
+                "degraded_steps": [],
+                "blocked_steps": [],
+                "failed_steps": [],
+                "strict_degraded": false
+            }
+        ]
     },
     "retrieval": {
         "mode": "keyword",
-        "hit_count": 1,
+        "hit_count": 2,
         "doc_ids": [
-            "md_1"
+            "md_1",
+            "md_2"
         ]
     }
 }
-
