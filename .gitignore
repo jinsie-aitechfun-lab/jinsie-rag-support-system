@@ -75,3 +75,8 @@ docs-private/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# =========================
+# Used for Chroma persistence directory, to avoid ingestion.
+# =========================
+var/
