@@ -6,7 +6,7 @@ from pydantic import BaseModel
 import jinsie_agent_platform as platform
 from jinsie_agent_platform.runner import workflow_runner
 
-from app.rag.retriever import format_context, keyword_retrieve
+from app.rag.retriever import format_context, keyword_retrieve, vector_retrieve
 
 app = FastAPI(title="Jinsie RAG Support System")
 
@@ -14,6 +14,8 @@ app = FastAPI(title="Jinsie RAG Support System")
 class RagRunRequest(BaseModel):
     query: str
     include_context: bool = False
+    retrieval_mode: str = "keyword"  # "keyword" | "vector"
+    top_k: int = 3
 
 
 @app.get("/health")
@@ -31,8 +33,16 @@ def _platform_prompt_path() -> str:
     return str(prompt)
 
 
-def _augment_query_with_context(query: str) -> tuple[str, list, str]:
-    docs = keyword_retrieve(query, top_k=3)
+def _augment_query_with_context(query: str, *, mode: str, top_k: int) -> tuple[str, list, str]:
+    mode_norm = (mode or "keyword").strip().lower()
+
+    if mode_norm == "vector":
+        docs = vector_retrieve(query, top_k=top_k)
+        used_mode = "vector"
+    else:
+        docs = keyword_retrieve(query, top_k=top_k)
+        used_mode = "keyword"
+
     context = format_context(docs)
 
     if not context:
@@ -43,25 +53,31 @@ def _augment_query_with_context(query: str) -> tuple[str, list, str]:
         f"【上下文】\n{context}\n\n"
         f"【用户问题】\n{query}"
     )
+    # Keep return signature; rag_run will set mode in response
     return augmented, docs, context
 
 
 @app.post("/v1/rag/run")
 def rag_run(req: RagRunRequest):
     try:
-        augmented, docs, context = _augment_query_with_context(req.query)
+        augmented, docs, context = _augment_query_with_context(
+            req.query, mode=req.retrieval_mode, top_k=req.top_k
+        )
 
         result = workflow_runner(
             augmented,
-            debug=False,
+            debug=True,
             prompt_path=_platform_prompt_path(),
         )
+
+        mode_norm = (req.retrieval_mode or "keyword").strip().lower()
+        resp_mode = "vector" if mode_norm == "vector" else "keyword"
 
         # 可审计：默认不返回上下文；需要时再打开
         resp = {
             "answer": result,
             "retrieval": {
-                "mode": "keyword",
+                "mode": resp_mode,
                 "hit_count": len(docs),
                 "doc_ids": [d.doc_id for d in docs],
             },

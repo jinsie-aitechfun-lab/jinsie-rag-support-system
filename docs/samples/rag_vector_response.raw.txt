@@ -1,0 +1,1 @@
+{"detail":"embedding http 404: Not Found"}

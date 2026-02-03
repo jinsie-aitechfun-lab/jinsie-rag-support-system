@@ -1,6 +1,12 @@
 SHELL := /bin/bash
-PYTHON := conda run -n py310 python
-UVICORN := conda run -n py310 python -m uvicorn
+
+# If you already activated (py310), prefer direct python for stable --reload logs.
+# Keep conda-run versions as fallbacks.
+PYTHON := python
+UVICORN := python -m uvicorn
+
+PYTHON_CONDA := conda run -n py310 python
+UVICORN_CONDA := conda run -n py310 python -m uvicorn
 
 PORT ?= 8001
 APP ?= app.main:app
@@ -10,19 +16,23 @@ SAMPLES_REQ ?= $(SAMPLES_DIR)/rag_keyword_request.json
 SAMPLES_RES ?= $(SAMPLES_DIR)/rag_keyword_response.json
 SAMPLES_RAW ?= $(SAMPLES_DIR)/rag_keyword_response.raw.txt
 
-.PHONY: help run health rag samples-rag ps kill
+.PHONY: help run run-conda health rag samples-rag ps kill
 
 help:
 	@echo "Targets:"
-	@echo "  make run              - start dev server on :$(PORT)"
+	@echo "  make run              - start dev server on :$(PORT) (prefer activated env)"
+	@echo "  make run-conda         - start dev server via conda run on :$(PORT)"
 	@echo "  make health           - curl /health"
 	@echo "  make rag Q='..'       - call /v1/rag/run"
 	@echo "  make samples-rag      - generate docs/samples rag response from request json"
 	@echo "  make ps               - show process listening on :$(PORT)"
-	@echo "  make kill             - kill process on :$(PORT)"
+	@echo "  make kill             - stop process on :$(PORT) (TERM -> KILL)"
 
 run:
 	$(UVICORN) $(APP) --reload --port $(PORT)
+
+run-conda:
+	$(UVICORN_CONDA) $(APP) --reload --port $(PORT)
 
 health:
 	@curl -s http://127.0.0.1:$(PORT)/health && echo
@@ -53,4 +63,10 @@ ps:
 	@lsof -nP -iTCP:$(PORT) -sTCP:LISTEN || true
 
 kill:
-	@lsof -t -iTCP:$(PORT) -sTCP:LISTEN | xargs -r kill -9
+	@PIDS="$$(lsof -t -iTCP:$(PORT) -sTCP:LISTEN)"; \
+	if [ -z "$$PIDS" ]; then echo "[OK] no process on :$(PORT)"; exit 0; fi; \
+	echo "[INFO] stopping: $$PIDS"; \
+	kill $$PIDS 2>/dev/null || true; \
+	sleep 0.3; \
+	PIDS2="$$(lsof -t -iTCP:$(PORT) -sTCP:LISTEN)"; \
+	if [ -n "$$PIDS2" ]; then echo "[WARN] still alive, force killing: $$PIDS2"; kill -9 $$PIDS2 2>/dev/null || true; fi

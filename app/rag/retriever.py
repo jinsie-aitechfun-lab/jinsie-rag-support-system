@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List
 
+from app.rag.vector_index import ChromaVectorIndex
+
 
 @dataclass(frozen=True)
 class RetrievedDoc:
@@ -85,7 +87,66 @@ def keyword_retrieve(query: str, *, top_k: int = 3) -> List[RetrievedDoc]:
     if scored and scored[0][0] == 0:
         return [d for _, d in scored[:top_k]]
 
-    return [d for score, d in scored if score > 0][:top_k]
+    return [d for score, d in scored if score > 0][:top_k
+
+
+]
+
+
+_VECTOR_INDEX: ChromaVectorIndex | None = None
+
+
+def _get_vector_index() -> ChromaVectorIndex:
+    global _VECTOR_INDEX
+    if _VECTOR_INDEX is None:
+        _VECTOR_INDEX = ChromaVectorIndex()
+    return _VECTOR_INDEX
+
+
+def vector_retrieve(query: str, *, top_k: int = 3) -> List[RetrievedDoc]:
+    """
+    Vector retriever (MVP) using Chroma persistent index.
+
+    - build index lazily on first call
+    - return chunk-level docs as RetrievedDoc to keep output shape consistent
+    """
+    q = (query or "").strip()
+    if not q:
+        return []
+
+    docs = _load_knowledge_md()
+    if not docs:
+        return []
+
+    idx = _get_vector_index()
+
+    # build once (lazy)
+    idx.ensure_built(
+        [
+            {
+                "doc_id": d.doc_id,
+                "title": d.title,
+                "content": d.content,
+                "source_path": d.source_path,
+            }
+            for d in docs
+        ]
+    )
+
+    hits = idx.query(q, top_k=top_k)
+    out: List[RetrievedDoc] = []
+    for chunk_id, chunk_text, meta in hits:
+        title = str(meta.get("title", ""))
+        source_path = str(meta.get("source_path", ""))
+        out.append(
+            RetrievedDoc(
+                doc_id=str(chunk_id),
+                title=title,
+                content=str(chunk_text),
+                source_path=source_path,
+            )
+        )
+    return out
 
 
 def format_context(docs: List[RetrievedDoc]) -> str:
