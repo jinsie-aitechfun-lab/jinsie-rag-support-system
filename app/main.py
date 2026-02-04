@@ -7,6 +7,7 @@ import jinsie_agent_platform as platform
 from jinsie_agent_platform.runner import workflow_runner
 
 from app.rag.retriever import format_context, keyword_retrieve, vector_retrieve
+from app.rag.llm_chat import chat_answer, has_chat_env
 
 app = FastAPI(title="Jinsie RAG Support System")
 
@@ -64,11 +65,24 @@ def rag_run(req: RagRunRequest):
             req.query, mode=req.retrieval_mode, top_k=req.top_k
         )
 
-        result = workflow_runner(
-            augmented,
-            debug=True,
-            prompt_path=_platform_prompt_path(),
-        )
+        # If chat env is ready, use real LLM; otherwise fallback to existing runner behavior.
+        if has_chat_env():
+            llm = chat_answer(augmented)
+            result = {
+                "task_status": "COMPLETED",
+                "stats": {"total_steps": 1, "ok": 1, "skipped": 0, "failed": 0, "degraded_count": 0},
+                "last_step_id": "step_1",
+                "tool": "llm_chat",
+                "output": {"answer": llm.get("text", "")},
+                "model": llm.get("model", ""),
+                "usage": llm.get("usage", {}),
+            }
+        else:
+            result = workflow_runner(
+                augmented,
+                debug=True,
+                prompt_path=_platform_prompt_path(),
+            )
 
         mode_norm = (req.retrieval_mode or "keyword").strip().lower()
         resp_mode = "vector" if mode_norm == "vector" else "keyword"
