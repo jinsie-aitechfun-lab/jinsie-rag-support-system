@@ -9,6 +9,8 @@ from jinsie_agent_platform.runner import workflow_runner
 from app.rag.retriever import format_context, keyword_retrieve, vector_retrieve
 from app.rag.llm_chat import chat_answer, has_chat_env
 
+from app.rag.pipeline import run_rag_pipeline
+
 app = FastAPI(title="Jinsie RAG Support System")
 
 
@@ -61,31 +63,17 @@ def _augment_query_with_context(query: str, *, mode: str, top_k: int) -> tuple[s
 @app.post("/v1/rag/run")
 def rag_run(req: RagRunRequest):
     try:
-        augmented, docs, context = _augment_query_with_context(
-            req.query, mode=req.retrieval_mode, top_k=req.top_k
+        out = run_rag_pipeline(
+            req.query,
+            retrieval_mode=req.retrieval_mode,
+            top_k=req.top_k,
+            debug=True,
         )
 
-        # If chat env is ready, use real LLM; otherwise fallback to existing runner behavior.
-        if has_chat_env():
-            llm = chat_answer(augmented)
-            result = {
-                "task_status": "COMPLETED",
-                "stats": {"total_steps": 1, "ok": 1, "skipped": 0, "failed": 0, "degraded_count": 0},
-                "last_step_id": "step_1",
-                "tool": "llm_chat",
-                "output": {"answer": llm.get("text", "")},
-                "model": llm.get("model", ""),
-                "usage": llm.get("usage", {}),
-            }
-        else:
-            result = workflow_runner(
-                augmented,
-                debug=True,
-                prompt_path=_platform_prompt_path(),
-            )
-
-        mode_norm = (req.retrieval_mode or "keyword").strip().lower()
-        resp_mode = "vector" if mode_norm == "vector" else "keyword"
+        result = out["result"]
+        docs = out["docs"]
+        context = out["context"]
+        resp_mode = out["resp_mode"]
 
         # 可审计：默认不返回上下文；需要时再打开
         resp = {
