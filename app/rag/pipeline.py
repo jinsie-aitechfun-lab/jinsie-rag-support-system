@@ -5,6 +5,7 @@ from pathlib import Path
 import jinsie_agent_platform as platform
 from jinsie_agent_platform.runner import workflow_runner
 
+from app.rag.graph_runner import AnswerNode, GraphRunner, RetrieverNode
 from app.rag.llm_chat import chat_answer, has_chat_env
 from app.rag.retriever import format_context, keyword_retrieve, vector_retrieve
 
@@ -97,6 +98,31 @@ def _augment_query_with_context(query: str, *, mode: str, top_k: int) -> tuple[s
     return augmented, docs, context
 
 
+def _retriever_node_fn(state: dict) -> dict:
+    query = state.get("query", "")
+    retrieval_mode = state.get("retrieval_mode", "keyword")
+    top_k = int(state.get("top_k", 3))
+
+    augmented, docs, context = _augment_query_with_context(query, mode=retrieval_mode, top_k=top_k)
+
+    mode_norm = (retrieval_mode or "keyword").strip().lower()
+    resp_mode = "vector" if mode_norm == "vector" else "keyword"
+
+    return {
+        "augmented": augmented,
+        "docs": docs,
+        "context": context,
+        "resp_mode": resp_mode,
+    }
+
+
+def _answer_node_fn(state: dict) -> dict:
+    augmented = state.get("augmented", state.get("query", ""))
+    debug = bool(state.get("debug", True))
+    result = _answer(augmented, debug=debug)
+    return {"result": result}
+
+
 def run_rag_pipeline(
     query: str,
     *,
@@ -116,15 +142,25 @@ def run_rag_pipeline(
         "resp_mode": "keyword" | "vector"
       }
     """
-    # Stage 1+2 (keep existing helper signature, but now internally staged)
-    augmented, docs, context = _augment_query_with_context(
-        query, mode=retrieval_mode, top_k=top_k
+    graph = GraphRunner(
+        nodes=[
+            RetrieverNode(retrieve_fn=_retriever_node_fn),
+            AnswerNode(answer_fn=_answer_node_fn),
+        ]
     )
 
-    # Stage 3
-    result = _answer(augmented, debug=debug)
+    final_state = graph.run(
+        {
+            "query": query,
+            "retrieval_mode": retrieval_mode,
+            "top_k": top_k,
+            "debug": debug,
+        }
+    )
 
-    mode_norm = (retrieval_mode or "keyword").strip().lower()
-    resp_mode = "vector" if mode_norm == "vector" else "keyword"
-
-    return {"result": result, "docs": docs, "context": context, "resp_mode": resp_mode}
+    return {
+        "result": final_state.get("result"),
+        "docs": final_state.get("docs", []),
+        "context": final_state.get("context", ""),
+        "resp_mode": final_state.get("resp_mode", "keyword"),
+    }
