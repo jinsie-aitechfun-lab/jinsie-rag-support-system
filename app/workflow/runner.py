@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, List
 
 from app.workflow.base_node import BaseNode
@@ -35,12 +36,15 @@ class WorkflowRunner:
                 "context": _safe_summary(state.get("context", "")),
             }
 
+            t0 = time.time()
             res = n.run(state)
+            elapsed_ms = int((time.time() - t0) * 1000)
 
             step_record = {
                 "step_id": n.step_id,
                 "node_type": getattr(n, "node_type", "unknown"),
                 "ok": bool(res.ok),
+                "elapsed_ms": elapsed_ms,
                 "input_summary": input_summary,
                 "output_summary": _safe_summary(res.output),
             }
@@ -56,10 +60,20 @@ class WorkflowRunner:
 
             steps.append(step_record)
 
+        # 最终输出优先级：python_output(文本后处理) > answer(可能是dict/str)
+        final_text = state.get("python_output")
+        if final_text is None:
+            ans = state.get("answer", "")
+            if isinstance(ans, dict) and "text" in ans:
+                final_text = ans.get("text", "")
+            else:
+                final_text = ans
+
         return {
             "status": "COMPLETED",
             "steps": steps,
             "answer": state.get("answer", ""),
+            "final_text": final_text,
             "retrieval": {
                 "mode": state.get("retrieval_mode", ""),
                 "hit_count": (len(state.get("docs", []) or [])),
