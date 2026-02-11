@@ -11,6 +11,12 @@ from app.rag.llm_chat import chat_answer, has_chat_env
 
 from app.rag.pipeline import run_rag_pipeline
 
+from app.workflow.runner import WorkflowRunner
+from app.workflow.nodes.template_node import TemplateNode
+from app.workflow.nodes.retriever_node import RetrieverNode
+from app.workflow.nodes.llm_node import LLMNode
+from app.workflow.nodes.python_code_node import PythonCodeNode
+
 app = FastAPI(title="Jinsie RAG Support System")
 
 
@@ -19,6 +25,18 @@ class RagRunRequest(BaseModel):
     include_context: bool = False
     retrieval_mode: str = "keyword"  # "keyword" | "vector"
     top_k: int = 3
+
+
+class WorkflowRunRequest(BaseModel):
+    query: str
+    retrieval_mode: str = "keyword"  # "keyword" | "vector"
+    top_k: int = 3
+    template: str = (
+        "你将获得一段检索到的上下文，请优先基于上下文完成任务。\n\n"
+        "【上下文】\n{context}\n\n"
+        "【用户问题】\n{query}"
+    )
+    python_function: str = "to_text"
 
 
 @app.get("/health")
@@ -89,5 +107,31 @@ def rag_run(req: RagRunRequest):
             resp["retrieval"]["context_preview"] = context[:800]
 
         return resp
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/v1/workflow/run")
+def workflow_run(req: WorkflowRunRequest):
+    try:
+        # 最小 Node + Runner：Retriever -> Template -> LLM -> PythonCode
+        runner = WorkflowRunner(
+            nodes=[
+                RetrieverNode(step_id="step_1_retriever", mode=req.retrieval_mode, top_k=req.top_k),
+                TemplateNode(step_id="step_2_template", template=req.template),
+                LLMNode(step_id="step_3_llm"),
+                PythonCodeNode(step_id="step_4_python", function_name=req.python_function),
+            ]
+        )
+
+        out = runner.run(
+            {
+                "query": req.query,
+                # retriever 会产出 context/docs/mode
+                "context": "",
+            }
+        )
+
+        return out
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

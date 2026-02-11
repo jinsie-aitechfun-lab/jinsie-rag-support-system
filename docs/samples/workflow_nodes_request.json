@@ -1,0 +1,7 @@
+{
+  "query": "请用本地知识库回答：intro.md 里写了什么？用 3 条要点总结",
+  "retrieval_mode": "keyword",
+  "top_k": 3,
+  "template": "你将获得一段检索到的上下文，请优先基于上下文完成任务。\n\n【上下文】\n{context}\n\n【用户问题】\n{query}",
+  "python_function": "to_text"
+}
