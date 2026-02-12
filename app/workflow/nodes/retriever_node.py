@@ -15,6 +15,21 @@ class RetrieverNode(BaseNode):
         self.top_k = int(top_k or 3)
 
     def run(self, state: Dict[str, Any]) -> NodeResult:
+        """
+        LLMOps 分层定位：Data / Knowledge Layer（数据与知识层）
+
+        输入契约（从 state 读取）：
+        - query: str（必填）
+
+        输出契约（写回 state）：
+        - retrieval_mode: "keyword" | "vector"
+        - docs: List[RetrievedDoc]
+        - context: str（由 docs 格式化而来，供后续 prompt 编排使用）
+
+        说明：
+        - 这是 RAG 的“召回阶段”，只负责拿到资料与压缩后的上下文
+        - 不负责 prompt 组装、不负责调用 LLM（这两件事分别由 TemplateNode / LLMNode 处理）
+        """
         try:
             query = (state.get("query") or "").strip()
             if not query:
