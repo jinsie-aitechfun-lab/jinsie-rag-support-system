@@ -19,7 +19,9 @@ SAMPLES_RAW ?= $(SAMPLES_DIR)/rag_keyword_response.raw.txt
 # RAG retrieval mode: keyword | vector
 MODE ?= keyword
 
-.PHONY: help run run-conda health rag samples-rag ps kill
+BASE_URL ?= http://127.0.0.1:8001
+
+.PHONY: help run run-conda health rag samples-rag ps kill acceptance
 
 help:
 	@echo "Targets:"
@@ -31,6 +33,7 @@ help:
 	@echo "  make samples-rag MODE=vector   - generate docs/samples rag response from request json (override mode)"
 	@echo "  make ps                        - show process listening on :$(PORT)"
 	@echo "  make kill                      - stop process on :$(PORT) (TERM -> KILL)"
+	@echo "  make acceptance                - run acceptance contract & metrics (override BASE_URL=...)"
 
 run:
 	$(UVICORN) $(APP) --reload --port $(PORT)
@@ -62,6 +65,9 @@ samples-rag:
 	  && $(PYTHON) -m json.tool "$(SAMPLES_RAW)" > "$(SAMPLES_RES)" \
 	  && echo "[OK] wrote $(SAMPLES_RES)" \
 	  || (echo "[ERR] response is not valid JSON, kept raw at $(SAMPLES_RAW)"; exit 1)
+
+acceptance:
+	@$(PYTHON) scripts/acceptance_rag_contract_metrics.py --base-url "$(BASE_URL)"
 
 ps:
 	@lsof -nP -iTCP:$(PORT) -sTCP:LISTEN || true
