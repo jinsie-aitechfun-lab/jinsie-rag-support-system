@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import time
 
 import jinsie_agent_platform as platform
 from jinsie_agent_platform.runner import workflow_runner
@@ -103,7 +104,10 @@ def _retriever_node_fn(state: dict) -> dict:
     retrieval_mode = state.get("retrieval_mode", "keyword")
     top_k = int(state.get("top_k", 3))
 
+    t0 = time.perf_counter()
     augmented, docs, context = _augment_query_with_context(query, mode=retrieval_mode, top_k=top_k)
+    t1 = time.perf_counter()
+    retrieval_ms = round((t1 - t0) * 1000.0, 1)
 
     mode_norm = (retrieval_mode or "keyword").strip().lower()
     resp_mode = "vector" if mode_norm == "vector" else "keyword"
@@ -113,14 +117,23 @@ def _retriever_node_fn(state: dict) -> dict:
         "docs": docs,
         "context": context,
         "resp_mode": resp_mode,
+        "retrieval_ms": retrieval_ms,
     }
 
 
 def _answer_node_fn(state: dict) -> dict:
     augmented = state.get("augmented", state.get("query", ""))
     debug = bool(state.get("debug", True))
+
+    t0 = time.perf_counter()
     result = _answer(augmented, debug=debug)
-    return {"result": result}
+    t1 = time.perf_counter()
+    llm_ms = round((t1 - t0) * 1000.0, 1)
+
+    return {
+        "result": result,
+        "llm_ms": llm_ms,
+    }
 
 
 def run_rag_pipeline(
@@ -149,6 +162,7 @@ def run_rag_pipeline(
         ]
     )
 
+    t0_total = time.perf_counter()
     final_state = graph.run(
         {
             "query": query,
@@ -157,10 +171,20 @@ def run_rag_pipeline(
             "debug": debug,
         }
     )
+    t1_total = time.perf_counter()
+    total_ms = round((t1_total - t0_total) * 1000.0, 1)
+
+    retrieval_ms = final_state.get("retrieval_ms")
+    llm_ms = final_state.get("llm_ms")
 
     return {
         "result": final_state.get("result"),
         "docs": final_state.get("docs", []),
         "context": final_state.get("context", ""),
         "resp_mode": final_state.get("resp_mode", "keyword"),
+        "metrics": {
+            "total_ms": total_ms,
+            "retrieval_ms": retrieval_ms,
+            "llm_ms": llm_ms,
+        },
     }

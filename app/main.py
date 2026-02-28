@@ -172,6 +172,8 @@ def rag_run(req: RagRunRequest):
     if req.include_context:
         data["retrieval"]["context_preview"] = context[:800]
 
+    data["metrics"] = out.get("metrics", {})
+
     return _ok(data, request_id=request_id)
 
 
