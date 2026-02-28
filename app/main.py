@@ -1,5 +1,6 @@
 from pathlib import Path
 import time
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -60,12 +61,52 @@ def health():
     return {"status": "ok"}
 
 
+def _utc_timestamp() -> str:
+    # ISO 8601 in UTC with 'Z' suffix, e.g. 2026-02-28T15:32:11Z
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
 def _ok(data: dict, *, request_id: str) -> dict:
-    return {"success": True, "request_id": request_id, "data": data}
+    return {
+        "success": True,
+        "request_id": request_id,
+        "timestamp": _utc_timestamp(),
+        "error_code": None,
+        "data": data,
+    }
 
 
 def _err(code: str, message: str, *, request_id: str) -> dict:
-    return {"success": False, "request_id": request_id, "error": {"code": code, "message": message}}
+    return {
+        "success": False,
+        "request_id": request_id,
+        "timestamp": _utc_timestamp(),
+        "error_code": code,
+        "error": {"code": code, "message": message},
+    }
+
+
+def _normalize_metrics(metrics: dict | None) -> dict:
+    """
+    Unify metrics shape for all endpoints:
+      { "total_ms": <float>, "retrieval_ms": <float>, "llm_ms": <float> }
+    Missing/None/invalid values are filled with 0.0.
+    """
+    metrics = metrics or {}
+
+    def _as_float(v) -> float:
+        if v is None:
+            return 0.0
+        try:
+            return float(v)
+        except Exception:
+            return 0.0
+
+    return {
+        "total_ms": _as_float(metrics.get("total_ms")),
+        "retrieval_ms": _as_float(metrics.get("retrieval_ms")),
+        "llm_ms": _as_float(metrics.get("llm_ms")),
+    }
 
 
 @app.exception_handler(RequestValidationError)
@@ -173,7 +214,7 @@ def rag_run(req: RagRunRequest):
     if req.include_context:
         data["retrieval"]["context_preview"] = context[:800]
 
-    data["metrics"] = out.get("metrics", {})
+    data["metrics"] = _normalize_metrics(out.get("metrics", {}))
 
     return _ok(data, request_id=request_id)
 
@@ -202,6 +243,12 @@ def workflow_run(req: WorkflowRunRequest):
     )
     t1 = time.perf_counter()
 
-    out["metrics"] = {"total_ms": round((t1 - t0) * 1000.0, 1)}
+    out["metrics"] = _normalize_metrics(
+        {
+            "total_ms": round((t1 - t0) * 1000.0, 1),
+            "retrieval_ms": 0.0,
+            "llm_ms": 0.0,
+        }
+    )
 
     return _ok(out, request_id=request_id)
