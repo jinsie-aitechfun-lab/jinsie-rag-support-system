@@ -59,9 +59,16 @@ def _http_post_json(url: str, payload: Dict[str, Any], timeout_s: int = 30) -> T
 # assertions & parsing
 # ---------------------------
 
-def _die(msg: str) -> None:
-    print(f"[FAIL] {msg}")
-    sys.exit(2)
+class _AcceptanceFail(RuntimeError):
+    def __init__(self, tag: str, msg: str) -> None:
+        super().__init__(msg)
+        self.tag = tag
+        self.msg = msg
+
+
+def _die(tag: str, msg: str) -> None:
+    # Do NOT sys.exit here; let main() print SUMMARY + FAILURE DETAILS and then exit with same code.
+    raise _AcceptanceFail(tag=tag, msg=msg)
 
 
 def _ok(msg: str) -> None:
@@ -133,19 +140,19 @@ def _assert_utc_iso8601(ts: str) -> None:
     try:
         dt = datetime.fromisoformat(s_norm)
     except Exception:
-        _die(f"timestamp is not ISO8601 parseable: {ts!r}")
+        _die("timestamp", f"timestamp is not ISO8601 parseable: {ts!r}")
 
     if dt.tzinfo is None:
-        _die(f"timestamp must be timezone-aware (UTC), got naive: {ts!r}")
+        _die("timestamp", f"timestamp must be timezone-aware (UTC), got naive: {ts!r}")
 
     # must be UTC (offset 0)
     offset = dt.utcoffset()
     if offset is None or offset.total_seconds() != 0:
-        _die(f"timestamp must be UTC (Z/+00:00). got: {ts!r}")
+        _die("timestamp", f"timestamp must be UTC (Z/+00:00). got: {ts!r}")
 
     # additionally ensure "looks like" UTC form
     if not (s.endswith("Z") or s.endswith("+00:00")):
-        _die(f"timestamp must end with 'Z' or '+00:00'. got: {ts!r}")
+        _die("timestamp", f"timestamp must end with 'Z' or '+00:00'. got: {ts!r}")
 
 
 def _print_metrics(metrics: Dict[str, Any]) -> None:
@@ -160,12 +167,12 @@ def _print_metrics(metrics: Dict[str, Any]) -> None:
     print(f"    llm_ms:       {llm_ms}")
 
 
-def _assert_positive_metric(metrics: Dict[str, Any], key_candidates: Tuple[str, ...], label: str) -> None:
+def _assert_positive_metric(metrics: Dict[str, Any], key_candidates: Tuple[str, ...], label: str, tag: str) -> None:
     v = _get_first_number(metrics, key_candidates)
     if v is None:
-        _die(f"{label} missing in metrics (checked keys={list(key_candidates)})")
+        _die(tag, f"{label} missing in metrics (checked keys={list(key_candidates)})")
     if v <= 0:
-        _die(f"{label} must be > 0, got {v}")
+        _die(tag, f"{label} must be > 0, got {v}")
 
 
 # ---------------------------
@@ -176,6 +183,7 @@ def _assert_positive_metric(metrics: Dict[str, Any], key_candidates: Tuple[str, 
 class CaseResult:
     name: str
     ok: bool
+    fail_tag: Optional[str] = None
 
 
 def case_rag(base_url: str, mode: str, timeout_s: int) -> CaseResult:
@@ -198,14 +206,16 @@ def case_rag(base_url: str, mode: str, timeout_s: int) -> CaseResult:
     if code != 200:
         print("  response:")
         print(json.dumps(data, ensure_ascii=False, indent=2))
-        _die(f"/v1/rag/run [{mode}] expected 200, got {code}")
+        print("[FAIL] http_status != 200")
+        _die("http_status", f"/v1/rag/run [{mode}] expected 200, got {code}")
 
     # Contract checks
     ts = _find_timestamp(data)
     if not ts:
         print("  response:")
         print(json.dumps(data, ensure_ascii=False, indent=2))
-        _die("timestamp not found in response (top-level or one-level down)")
+        print("[FAIL] timestamp missing")
+        _die("timestamp", "timestamp not found in response (top-level or one-level down)")
 
     _assert_utc_iso8601(ts)
     _ok(f"timestamp is UTC ISO8601: {ts}")
@@ -214,12 +224,13 @@ def case_rag(base_url: str, mode: str, timeout_s: int) -> CaseResult:
     if not metrics:
         print("  response:")
         print(json.dumps(data, ensure_ascii=False, indent=2))
-        _die("metrics not found in response (expected field: metrics)")
+        print("[FAIL] metrics missing")
+        _die("metrics", "metrics not found in response (expected field: metrics)")
 
     _print_metrics(metrics)
 
     # Metrics assertions (per your Day35 spec)
-    _assert_positive_metric(metrics, ("retrieval_ms", "retrieve_ms", "retrieval_time_ms"), "retrieval_ms")
+    _assert_positive_metric(metrics, ("retrieval_ms", "retrieve_ms", "retrieval_time_ms"), "retrieval_ms", "retrieval_ms")
     _ok("retrieval_ms > 0")
 
     return CaseResult(name=f"rag_{mode}", ok=True)
@@ -240,18 +251,20 @@ def case_workflow(base_url: str, timeout_s: int) -> CaseResult:
     if code != 200:
         print("  response:")
         print(json.dumps(data, ensure_ascii=False, indent=2))
-        _die(f"/v1/workflow/run expected 200, got {code}")
+        print("[FAIL] http_status != 200")
+        _die("http_status", f"/v1/workflow/run expected 200, got {code}")
 
     metrics = _find_metrics(data)
     if not metrics:
         print("  response:")
         print(json.dumps(data, ensure_ascii=False, indent=2))
-        _die("metrics not found in workflow response (expected field: metrics)")
+        print("[FAIL] metrics missing")
+        _die("metrics", "metrics not found in workflow response (expected field: metrics)")
 
     _print_metrics(metrics)
 
     # Minimal requirement: total_ms must be > 0 and not a placeholder.
-    _assert_positive_metric(metrics, ("total_ms", "total", "total_time_ms"), "total_ms")
+    _assert_positive_metric(metrics, ("total_ms", "total", "total_time_ms"), "total_ms", "total_ms")
     _ok("total_ms > 0")
 
     return CaseResult(name="workflow_run", ok=True)
@@ -270,9 +283,24 @@ def main() -> int:
     start = time.time()
 
     results = []
-    results.append(case_rag(args.base_url, mode="keyword", timeout_s=args.timeout))
-    results.append(case_rag(args.base_url, mode="vector", timeout_s=args.timeout))
-    results.append(case_workflow(args.base_url, timeout_s=args.timeout))
+    failure_pairs = []  # (case_name, fail_tag)
+
+    def _run_case(fn, case_name_hint: str) -> None:
+        try:
+            r = fn()
+            results.append(r)
+        except _AcceptanceFail as e:
+            results.append(CaseResult(name=case_name_hint, ok=False, fail_tag=e.tag))
+            failure_pairs.append((case_name_hint, e.tag))
+        except Exception as e:
+            # Keep failure readable even when it's a transport/runtime error.
+            print(f"[FAIL] exception: {e}")
+            results.append(CaseResult(name=case_name_hint, ok=False, fail_tag="exception"))
+            failure_pairs.append((case_name_hint, "exception"))
+
+    _run_case(lambda: case_rag(args.base_url, mode="keyword", timeout_s=args.timeout), "rag_keyword")
+    _run_case(lambda: case_rag(args.base_url, mode="vector", timeout_s=args.timeout), "rag_vector")
+    _run_case(lambda: case_workflow(args.base_url, timeout_s=args.timeout), "workflow_run")
 
     ok_count = sum(1 for r in results if r.ok)
     total = len(results)
@@ -280,9 +308,18 @@ def main() -> int:
 
     print("\n== SUMMARY ==")
     for r in results:
-        print(f"  - {r.name}: {'PASS' if r.ok else 'FAIL'}")
+        if r.ok:
+            print(f"  - {r.name}: PASS")
+        else:
+            print(f"  - {r.name}: FAIL ({r.fail_tag})")
     print(f"  passed: {ok_count}/{total}")
     print(f"  wall_time_s: {elapsed:.2f}")
+
+    if failure_pairs:
+        print("\n== FAILURE DETAILS ==")
+        for case_name, tag in failure_pairs:
+            print(f"  - {case_name} \u2192 {tag}")
+        return 2
 
     _ok("Acceptance guardrail complete.")
     return 0
