@@ -1,3 +1,10 @@
+# LLMOps Backend Structure
+# - API Layer: FastAPI (app/main.py)
+# - Orchestration Layer: workflow/ (base_node.py, runner.py, nodes/)
+# - Retrieval Layer: rag/retriever.py (keyword/vector), rag/vector_index.py, rag/embeddings.py
+# - Inference Layer: rag/llm_chat.py (OpenAI-compatible chat completions)
+# - Graph Runner: rag/graph_runner.py (pipeline execution wrapper)
+# - Observability: workflow runner step stats + explicit env validation errors
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
