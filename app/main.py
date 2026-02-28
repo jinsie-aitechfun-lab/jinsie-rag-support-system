@@ -1,4 +1,5 @@
 from pathlib import Path
+import time
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -191,6 +192,7 @@ def workflow_run(req: WorkflowRunRequest):
         ]
     )
 
+    t0 = time.perf_counter()
     out = runner.run(
         {
             "query": req.query,
@@ -198,5 +200,8 @@ def workflow_run(req: WorkflowRunRequest):
             "context": "",
         }
     )
+    t1 = time.perf_counter()
+
+    out["metrics"] = {"total_ms": round((t1 - t0) * 1000.0, 1)}
 
     return _ok(out, request_id=request_id)
