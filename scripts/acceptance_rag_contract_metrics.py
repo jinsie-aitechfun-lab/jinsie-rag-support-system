@@ -278,6 +278,18 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", required=True, help="e.g. http://127.0.0.1:8001")
     parser.add_argument("--timeout", type=int, default=30, help="request timeout seconds")
+    parser.add_argument(
+        "--baseline-wall-time-s",
+        type=float,
+        default=None,
+        help="optional baseline wall_time_s for manual regression visibility (no fail), e.g. 15.08",
+    )
+    parser.add_argument(
+        "--drift-threshold-pct",
+        type=float,
+        default=20.0,
+        help="warn when wall_time drift exceeds this percent (default: 20)",
+    )
     args = parser.parse_args()
 
     start = time.time()
@@ -314,6 +326,15 @@ def main() -> int:
             print(f"  - {r.name}: FAIL ({r.fail_tag})")
     print(f"  passed: {ok_count}/{total}")
     print(f"  wall_time_s: {elapsed:.2f}")
+
+    # Baseline regression visibility (manual, non-failing)
+    if args.baseline_wall_time_s is not None and args.baseline_wall_time_s > 0:
+        baseline = float(args.baseline_wall_time_s)
+        drift_pct = ((elapsed - baseline) / baseline) * 100.0
+        print(f"  baseline_wall_time_s: {baseline:.2f}")
+        print(f"  wall_time_drift_pct: {drift_pct:+.1f}")
+        if abs(drift_pct) >= float(args.drift_threshold_pct):
+            print(f"[WARN] wall_time drift >= {float(args.drift_threshold_pct):.0f}% (manual visibility only)")
 
     if failure_pairs:
         print("\n== FAILURE DETAILS ==")
