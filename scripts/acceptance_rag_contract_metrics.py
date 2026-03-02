@@ -31,12 +31,22 @@ from typing import Any, Dict, Optional, Tuple
 # tiny http helpers (stdlib)
 # ---------------------------
 
-def _http_post_json(url: str, payload: Dict[str, Any], timeout_s: int = 30) -> Tuple[int, Dict[str, Any]]:
+def _http_post_json(
+    url: str,
+    payload: Dict[str, Any],
+    timeout_s: int = 30,
+    headers: Optional[Dict[str, str]] = None,
+) -> Tuple[int, Dict[str, Any]]:
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+    req_headers = {"Content-Type": "application/json"}
+    if headers:
+        req_headers.update(headers)
+
     req = urllib.request.Request(
         url=url,
         data=body,
-        headers={"Content-Type": "application/json"},
+        headers=req_headers,
         method="POST",
     )
     try:
@@ -270,6 +280,42 @@ def case_workflow(base_url: str, timeout_s: int) -> CaseResult:
     return CaseResult(name="workflow_run", ok=True)
 
 
+def case_workflow_langgraph(base_url: str, timeout_s: int) -> CaseResult:
+    print("\n== CASE: /v1/workflow/run [langgraph] ==")
+    url = f"{base_url.rstrip('/')}/v1/workflow/run"
+
+    payload = {
+        "query": "acceptance: workflow contract+metrics guardrail",
+    }
+
+    headers = {
+        "x-workflow-engine": "langgraph",
+    }
+
+    code, data = _http_post_json(url, payload, timeout_s=timeout_s, headers=headers)
+    print(f"  http_status: {code}")
+
+    if code != 200:
+        print("  response:")
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+        print("[FAIL] http_status != 200")
+        _die("http_status", f"/v1/workflow/run [langgraph] expected 200, got {code}")
+
+    metrics = _find_metrics(data)
+    if not metrics:
+        print("  response:")
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+        print("[FAIL] metrics missing")
+        _die("metrics", "metrics not found in workflow response (langgraph)")
+
+    _print_metrics(metrics)
+
+    _assert_positive_metric(metrics, ("total_ms", "total", "total_time_ms"), "total_ms", "total_ms")
+    _ok("total_ms > 0")
+
+    return CaseResult(name="workflow_run_langgraph", ok=True)
+
+
 # ---------------------------
 # main
 # ---------------------------
@@ -313,6 +359,7 @@ def main() -> int:
     _run_case(lambda: case_rag(args.base_url, mode="keyword", timeout_s=args.timeout), "rag_keyword")
     _run_case(lambda: case_rag(args.base_url, mode="vector", timeout_s=args.timeout), "rag_vector")
     _run_case(lambda: case_workflow(args.base_url, timeout_s=args.timeout), "workflow_run")
+    _run_case(lambda: case_workflow_langgraph(args.base_url, timeout_s=args.timeout), "workflow_run_langgraph")
 
     ok_count = sum(1 for r in results if r.ok)
     total = len(results)
@@ -339,7 +386,7 @@ def main() -> int:
     if failure_pairs:
         print("\n== FAILURE DETAILS ==")
         for case_name, tag in failure_pairs:
-            print(f"  - {case_name} \u2192 {tag}")
+            print(f"  - {case_name} → {tag}")
         return 2
 
     _ok("Acceptance guardrail complete.")
