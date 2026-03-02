@@ -14,6 +14,7 @@ from app.rag.llm_chat import chat_answer, has_chat_env
 from app.rag.pipeline import run_rag_pipeline
 
 from app.workflow.runner import WorkflowRunner
+from app.workflow.graph_runner_langgraph import run_langgraph_workflow
 from app.workflow.nodes.template_node import TemplateNode
 from app.workflow.nodes.retriever_node import RetrieverNode
 from app.workflow.nodes.llm_node import LLMNode
@@ -220,34 +221,62 @@ def rag_run(req: RagRunRequest):
 
 
 @app.post("/v1/workflow/run")
-def workflow_run(req: WorkflowRunRequest):
+def workflow_run(req: WorkflowRunRequest, request: Request):
     request_id = str(uuid4())
 
+    # Header 灰度开关：不改 schema（默认 legacy）
+    engine = (request.headers.get("x-workflow-engine") or "legacy").strip().lower()
+
     # 最小 Node + Runner：Retriever -> Template -> LLM -> PythonCode
-    runner = WorkflowRunner(
-        nodes=[
-            RetrieverNode(step_id="step_1_retriever", mode=req.retrieval_mode, top_k=req.top_k),
-            TemplateNode(step_id="step_2_template", template=req.template),
-            LLMNode(step_id="step_3_llm"),
-            PythonCodeNode(step_id="step_4_python", function_name=req.python_function),
-        ]
-    )
+    nodes = [
+        RetrieverNode(step_id="step_1_retriever", mode=req.retrieval_mode, top_k=req.top_k),
+        TemplateNode(step_id="step_2_template", template=req.template),
+        LLMNode(step_id="step_3_llm"),
+        PythonCodeNode(step_id="step_4_python", function_name=req.python_function),
+    ]
 
     t0 = time.perf_counter()
-    out = runner.run(
-        {
-            "query": req.query,
-            # retriever 会产出 context/docs/mode
-            "context": "",
-        }
-    )
+
+    if engine == "langgraph":
+        out = run_langgraph_workflow(
+            nodes,
+            {
+                "query": req.query,
+                "context": "",
+            },
+        )
+    else:
+        runner = WorkflowRunner(nodes=nodes)
+        out = runner.run(
+            {
+                "query": req.query,
+                # retriever 会产出 context/docs/mode
+                "context": "",
+            }
+        )
+
     t1 = time.perf_counter()
+
+    # ✅ metrics 真值化（复用 steps[].elapsed_ms）
+    steps = out.get("steps", []) or []
+
+    def _step_ms(step_id: str) -> float:
+        for s in steps:
+            if s.get("step_id") == step_id:
+                try:
+                    return float(s.get("elapsed_ms") or 0.0)
+                except Exception:
+                    return 0.0
+        return 0.0
+
+    retrieval_ms = _step_ms("step_1_retriever")
+    llm_ms = _step_ms("step_3_llm")
 
     out["metrics"] = _normalize_metrics(
         {
             "total_ms": round((t1 - t0) * 1000.0, 1),
-            "retrieval_ms": 0.0,
-            "llm_ms": 0.0,
+            "retrieval_ms": retrieval_ms,
+            "llm_ms": llm_ms,
         }
     )
 
