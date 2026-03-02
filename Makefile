@@ -21,7 +21,7 @@ MODE ?= keyword
 
 BASE_URL ?= http://127.0.0.1:8001
 
-.PHONY: help run run-conda health rag samples-rag ps kill acceptance
+.PHONY: help run run-conda health rag samples-rag ps kill acceptance health-check health-check-strict
 
 help:
 	@echo "Targets:"
@@ -34,6 +34,8 @@ help:
 	@echo "  make ps                        - show process listening on :$(PORT)"
 	@echo "  make kill                      - stop process on :$(PORT) (TERM -> KILL)"
 	@echo "  make acceptance                - run acceptance contract & metrics (override BASE_URL=...)"
+	@echo " make health-check - run project health-check (print-only, override BASE_URL=...)"
+	@echo " make health-check-strict - run project health-check (strict assertions, override BASE_URL=...)"
 
 run:
 	$(UVICORN) $(APP) --reload --port $(PORT)
@@ -68,6 +70,12 @@ samples-rag:
 
 acceptance:
 	@$(PYTHON) scripts/acceptance_rag_contract_metrics.py --base-url "$(BASE_URL)"
+	
+health-check:
+	@$(PYTHON) scripts/project_health_check.py --base-url "$(BASE_URL)"
+
+health-check-strict:
+	@$(PYTHON) scripts/project_health_check.py --strict --base-url "$(BASE_URL)"
 
 ps:
 	@lsof -nP -iTCP:$(PORT) -sTCP:LISTEN || true

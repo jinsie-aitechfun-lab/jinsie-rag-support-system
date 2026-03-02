@@ -107,14 +107,38 @@ def _print_section(title: str) -> None:
     print(f"== {title} ==")
 
 
+def _is_nonempty_str(v: Any) -> bool:
+    return isinstance(v, str) and v.strip() != ""
+
+
+def _is_number(v: Any) -> bool:
+    # avoid treating bool as int
+    if isinstance(v, bool):
+        return False
+    return isinstance(v, (int, float))
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Project health check (no assertions, print-only).")
+    ap = argparse.ArgumentParser(description="Project health check (default: print-only; optional strict assertions).")
     ap.add_argument("--base-url", default="http://127.0.0.1:8001", help="API base url (default: http://127.0.0.1:8001)")
     ap.add_argument("--timeout-s", type=int, default=25, help="HTTP timeout seconds (default: 25)")
+    ap.add_argument("--strict", action="store_true", help="Enable strict assertions and exit non-zero on failures.")
     args = ap.parse_args()
 
     base_url = args.base_url.rstrip("/")
     timeout_s = int(args.timeout_s)
+    strict = bool(args.strict)
+
+    failures = 0
+
+    def _fail(msg: str) -> None:
+        nonlocal failures
+        failures += 1
+        print(f"[FAIL] {msg}")
+
+    def _assert(cond: bool, msg: str) -> None:
+        if not cond:
+            _fail(msg)
 
     # 1) /health
     _print_section("/health")
@@ -124,6 +148,9 @@ def main() -> int:
     _print_kv("wall_ms", round(wall_ms, 1))
     # keep raw response visible for debugging
     _print_kv("response", data)
+
+    if strict:
+        _assert(code == 200, f"/health http_status expected 200, got {code}")
 
     # 2) /v1/rag/run keyword
     _print_section("/v1/rag/run [keyword]")
@@ -138,10 +165,15 @@ def main() -> int:
     _print_kv("wall_ms", round(wall_ms, 1))
 
     # Contract-ish fields (print only)
-    _print_kv("success", _get(data, "success"))
-    _print_kv("request_id", _get(data, "request_id"))
-    _print_kv("timestamp", _get(data, "timestamp"))
-    _print_kv("error_code", _get(data, "error_code"))
+    success = _get(data, "success")
+    request_id = _get(data, "request_id")
+    timestamp = _get(data, "timestamp")
+    error_code = _get(data, "error_code")
+
+    _print_kv("success", success)
+    _print_kv("request_id", request_id)
+    _print_kv("timestamp", timestamp)
+    _print_kv("error_code", error_code)
 
     # data payload (if success)
     resp_data = _get(data, "data", {})
@@ -151,6 +183,22 @@ def main() -> int:
         _print_kv("metrics", _get(resp_data, "metrics"))
     else:
         _print_kv("data", resp_data)
+
+    if strict:
+        _assert(code == 200, f"/v1/rag/run http_status expected 200, got {code}")
+        _assert(success is True, f"/v1/rag/run success expected True, got {success}")
+        _assert(_is_nonempty_str(request_id), f"/v1/rag/run request_id expected non-empty string, got {request_id}")
+        _assert(_is_nonempty_str(timestamp), f"/v1/rag/run timestamp expected non-empty string, got {timestamp}")
+        _assert(error_code is None, f"/v1/rag/run error_code expected null (None), got {error_code}")
+
+        metrics = _get(resp_data, "metrics", _MISSING) if isinstance(resp_data, dict) else _MISSING
+        total_ms = _get(metrics, "total_ms") if isinstance(metrics, dict) else _MISSING
+        retrieval_ms = _get(metrics, "retrieval_ms") if isinstance(metrics, dict) else _MISSING
+        llm_ms = _get(metrics, "llm_ms") if isinstance(metrics, dict) else _MISSING
+
+        _assert(_is_number(total_ms) and float(total_ms) >= 0, f"/v1/rag/run metrics.total_ms expected number>=0, got {total_ms}")
+        _assert(_is_number(retrieval_ms) and float(retrieval_ms) >= 0, f"/v1/rag/run metrics.retrieval_ms expected number>=0, got {retrieval_ms}")
+        _assert(_is_number(llm_ms) and float(llm_ms) >= 0, f"/v1/rag/run metrics.llm_ms expected number>=0, got {llm_ms}")
 
     # 3) /v1/workflow/run langgraph
     _print_section("/v1/workflow/run [langgraph]")
@@ -165,14 +213,21 @@ def main() -> int:
     code, data, wall_ms = _http_json("POST", url, payload=payload, timeout_s=timeout_s, headers=headers)
     _print_kv("http_status", code)
     _print_kv("wall_ms", round(wall_ms, 1))
-    _print_kv("success", _get(data, "success"))
-    _print_kv("request_id", _get(data, "request_id"))
-    _print_kv("timestamp", _get(data, "timestamp"))
-    _print_kv("error_code", _get(data, "error_code"))
+
+    success = _get(data, "success")
+    request_id = _get(data, "request_id")
+    timestamp = _get(data, "timestamp")
+    error_code = _get(data, "error_code")
+
+    _print_kv("success", success)
+    _print_kv("request_id", request_id)
+    _print_kv("timestamp", timestamp)
+    _print_kv("error_code", error_code)
 
     resp_data = _get(data, "data", {})
     if isinstance(resp_data, dict):
-        _print_kv("meta.engine", _get(resp_data, "meta.engine"))
+        engine = _get(resp_data, "meta.engine")
+        _print_kv("meta.engine", engine)
         _print_kv("status", _get(resp_data, "status"))
         _print_kv("metrics", _get(resp_data, "metrics"))
         steps = _get(resp_data, "steps", [])
@@ -189,9 +244,34 @@ def main() -> int:
         else:
             _print_kv("steps", steps)
     else:
+        engine = _MISSING
         _print_kv("data", resp_data)
 
+    if strict:
+        _assert(code == 200, f"/v1/workflow/run http_status expected 200, got {code}")
+        _assert(success is True, f"/v1/workflow/run success expected True, got {success}")
+        _assert(_is_nonempty_str(request_id), f"/v1/workflow/run request_id expected non-empty string, got {request_id}")
+        _assert(_is_nonempty_str(timestamp), f"/v1/workflow/run timestamp expected non-empty string, got {timestamp}")
+        _assert(error_code is None, f"/v1/workflow/run error_code expected null (None), got {error_code}")
+        _assert(engine == "langgraph", f"/v1/workflow/run data.meta.engine expected 'langgraph', got {engine}")
+
+        metrics = _get(resp_data, "metrics", _MISSING) if isinstance(resp_data, dict) else _MISSING
+        total_ms = _get(metrics, "total_ms") if isinstance(metrics, dict) else _MISSING
+        retrieval_ms = _get(metrics, "retrieval_ms") if isinstance(metrics, dict) else _MISSING
+        llm_ms = _get(metrics, "llm_ms") if isinstance(metrics, dict) else _MISSING
+
+        _assert(_is_number(total_ms) and float(total_ms) >= 0, f"/v1/workflow/run metrics.total_ms expected number>=0, got {total_ms}")
+        _assert(_is_number(retrieval_ms) and float(retrieval_ms) >= 0, f"/v1/workflow/run metrics.retrieval_ms expected number>=0, got {retrieval_ms}")
+        _assert(_is_number(llm_ms) and float(llm_ms) >= 0, f"/v1/workflow/run metrics.llm_ms expected number>=0, got {llm_ms}")
+
     print()
+    if strict:
+        if failures == 0:
+            print("[OK] health-check finished (strict).")
+            return 0
+        print(f"[FAIL] health-check finished (strict), failures={failures}.")
+        return 1
+
     print("[OK] health-check finished (print-only).")
     return 0
 
