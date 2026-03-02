@@ -38,9 +38,10 @@ def run_langgraph_workflow(nodes: List[BaseNode], initial_state: Dict[str, Any])
                 "context": _safe_summary(s.get("context", "")),
             }
 
-            t0 = time.time()
+            # ✅ 真值化：使用 perf_counter + 小数 ms，避免 <1ms 被 int 截断为 0
+            t0 = time.perf_counter()
             res = n.run(s)
-            elapsed_ms = int((time.time() - t0) * 1000)
+            elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 1)
 
             step_record = {
                 "step_id": n.step_id,
