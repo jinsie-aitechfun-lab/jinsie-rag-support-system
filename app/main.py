@@ -271,6 +271,12 @@ def workflow_run(req: WorkflowRunRequest, request: Request):
 
     retrieval_ms = _step_ms("step_1_retriever")
     llm_ms = _step_ms("step_3_llm")
+    # 可观测：engine 灰度命中（不改 success/metrics 结构；只在 data 里追加）
+    meta = out.get("meta")
+    if not isinstance(meta, dict):
+        meta = {}
+        out["meta"] = meta
+    meta["engine"] = engine
 
     out["metrics"] = _normalize_metrics(
         {

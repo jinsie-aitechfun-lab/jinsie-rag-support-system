@@ -65,6 +65,31 @@ def _http_post_json(
         raise RuntimeError(f"HTTP POST failed: {url} -> {e}") from e
 
 
+def _should_retry_llm_transient_5xx(code: int, data: Dict[str, Any]) -> bool:
+    """
+    Acceptance should be resilient to upstream transient LLM 5xx / busy.
+    Our API may return 500 while the upstream message includes 502/503/504, etc.
+    We retry ONLY for known transient patterns.
+    """
+    if code not in (500, 502, 503, 504):
+        return False
+    if not isinstance(data, dict):
+        return False
+    err = data.get("error")
+    if not isinstance(err, dict):
+        return False
+    msg = err.get("message")
+    if not isinstance(msg, str):
+        return False
+
+    m = msg.lower()
+    if "chat http 5" in m:
+        return True
+    if "too busy" in m or "try again later" in m:
+        return True
+    return False
+
+
 # ---------------------------
 # assertions & parsing
 # ---------------------------
@@ -212,6 +237,18 @@ def case_rag(base_url: str, mode: str, timeout_s: int) -> CaseResult:
 
     code, data = _http_post_json(url, payload, timeout_s=timeout_s)
     print(f"  http_status: {code}")
+
+    # Upstream LLM transient 5xx/busy: retry at most 2 times with small backoff.
+    if _should_retry_llm_transient_5xx(code, data):
+        for i, sleep_s in enumerate((0.8, 1.6), start=1):
+            print(f"[WARN] upstream LLM transient error detected, retry {i}/2 after {sleep_s}s...")
+            time.sleep(sleep_s)
+            code, data = _http_post_json(url, payload, timeout_s=timeout_s)
+            print(f"  http_status(retry{i}): {code}")
+            if code == 200:
+                break
+            if not _should_retry_llm_transient_5xx(code, data):
+                break
 
     if code != 200:
         print("  response:")
@@ -386,7 +423,7 @@ def main() -> int:
     if failure_pairs:
         print("\n== FAILURE DETAILS ==")
         for case_name, tag in failure_pairs:
-            print(f"  - {case_name} → {tag}")
+            print(f"  - {case_name} \u2192 {tag}")
         return 2
 
     _ok("Acceptance guardrail complete.")
