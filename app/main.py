@@ -1,6 +1,7 @@
 from pathlib import Path
 import time
 from datetime import datetime, timezone
+import os
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -19,6 +20,8 @@ from app.workflow.nodes.template_node import TemplateNode
 from app.workflow.nodes.retriever_node import RetrieverNode
 from app.workflow.nodes.llm_node import LLMNode
 from app.workflow.nodes.python_code_node import PythonCodeNode
+
+from app.observability.emit import emit_metrics
 
 # ✅ Day30 实战：统一响应结构 + 统一错误语义（最小侵入式，不改主链路）
 from uuid import uuid4
@@ -216,6 +219,29 @@ def rag_run(req: RagRunRequest):
         data["retrieval"]["context_preview"] = context[:800]
 
     data["metrics"] = _normalize_metrics(out.get("metrics", {}))
+
+    # -----------------------------
+    # Observability (best-effort)
+    # -----------------------------
+    try:
+        engine = (os.getenv("RAG_ENGINE") or "jinsie-rag-support-system").strip()
+        m = data["metrics"] or {}
+        emit_metrics(
+            [
+                {
+                    "request_id": request_id,
+                    "total_ms": float(m.get("total_ms") or 0.0),
+                    "llm_ms": float(m.get("llm_ms") or 0.0),
+                    "retrieval_ms": float(m.get("retrieval_ms") or 0.0),
+                    "engine": engine,
+                    "status": "COMPLETED",
+                    "timestamp": _utc_timestamp(),
+                }
+            ]
+        )
+    except Exception:
+        # Never affect main response
+        pass
 
     return _ok(data, request_id=request_id)
 
