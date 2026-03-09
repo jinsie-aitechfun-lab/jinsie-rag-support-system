@@ -22,9 +22,9 @@ from app.workflow.nodes.retriever_node import RetrieverNode
 from app.workflow.nodes.llm_node import LLMNode
 from app.workflow.nodes.python_code_node import PythonCodeNode
 
-from app.observability.emit import emit_metrics
+from app.observability.emit import build_invocation_metric, emit_metrics
 
-# ✅ Day30 实战：统一响应结构 + 统一错误语义（最小侵入式，不改主链路）
+# ✅ 统一响应结构 + 统一错误语义（最小侵入式，不改主链路）
 from uuid import uuid4
 
 from fastapi import Request, status
@@ -162,6 +162,42 @@ def _estimate_cost(model: str, usage: dict) -> float:
     return round(cost, 6)
 
 
+def _emit_invocation_metrics(
+    *,
+    request_id: str,
+    engine: str,
+    status: str,
+    metrics: dict | None,
+    usage: dict | None,
+    cost: float,
+    timestamp: str | None = None,
+) -> None:
+    """
+    Unified best-effort observability emitter entry.
+    Must NEVER break main request path.
+    """
+    metrics_norm = _normalize_metrics(metrics)
+    usage_norm = _normalize_usage(usage)
+
+    emit_metrics(
+        [
+            build_invocation_metric(
+                request_id=request_id,
+                engine=engine,
+                status=status,
+                timestamp=timestamp or _utc_timestamp(),
+                total_ms=metrics_norm.get("total_ms"),
+                llm_ms=metrics_norm.get("llm_ms"),
+                retrieval_ms=metrics_norm.get("retrieval_ms"),
+                prompt_tokens=usage_norm.get("prompt_tokens"),
+                completion_tokens=usage_norm.get("completion_tokens"),
+                total_tokens=usage_norm.get("total_tokens"),
+                cost=cost,
+            )
+        ]
+    )
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """
@@ -257,32 +293,22 @@ def rag_run(req: RagRunRequest):
     # -----------------------------
     try:
         engine = (os.getenv("RAG_ENGINE") or "jinsie-rag-support-system").strip()
-        m = data["metrics"] or {}
         answer_obj = data.get("answer") or {}
         model = str(answer_obj.get("model") or engine)
         usage = _normalize_usage(answer_obj.get("usage") or {})
         cost = _estimate_cost(model, usage)
 
-        emit_metrics(
-            [
-                {
-                    "request_id": request_id,
-                    "total_ms": float(m.get("total_ms") or 0.0),
-                    "llm_ms": float(m.get("llm_ms") or 0.0),
-                    "retrieval_ms": float(m.get("retrieval_ms") or 0.0),
-                    "engine": engine,
-                    "status": "COMPLETED",
-                    "prompt_tokens": usage["prompt_tokens"],
-                    "completion_tokens": usage["completion_tokens"],
-                    "total_tokens": usage["total_tokens"],
-                    "cost": cost,
-                    "timestamp": _utc_timestamp(),
-                }
-            ]
+        _emit_invocation_metrics(
+            request_id=request_id,
+            engine=engine,
+            status="COMPLETED",
+            metrics=data.get("metrics"),
+            usage=usage,
+            cost=cost,
         )
-    except Exception:
+    except Exception as e:
         # Never affect main response
-        pass
+        logger.warning("rag_run emit metrics failed: %s", e)
 
     return _ok(data, request_id=request_id)
 
@@ -373,25 +399,13 @@ def workflow_run(req: WorkflowRunRequest, request: Request):
             or "unknown"
         )
 
-        emit_metrics(
-            [
-                {
-                    "request_id": request_id,
-                    "engine": f"workflow:{engine}",
-                    "status": str(out.get("status") or "COMPLETED"),
-                    "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                    "total_ms": float(out["metrics"].get("total_ms") or 0.0),
-                    "llm_ms": float(out["metrics"].get("llm_ms") or 0.0),
-                    "retrieval_ms": float(out["metrics"].get("retrieval_ms") or 0.0),
-                    "prompt_tokens": int(workflow_usage.get("prompt_tokens") or 0),
-                    "completion_tokens": int(workflow_usage.get("completion_tokens") or 0),
-                    "total_tokens": int(workflow_usage.get("total_tokens") or 0),
-                    "cost": _estimate_cost(
-                        llm_model,
-                        workflow_usage,
-                    ),
-                }
-            ]
+        _emit_invocation_metrics(
+            request_id=request_id,
+            engine=f"workflow:{engine}",
+            status=str(out.get("status") or "COMPLETED"),
+            metrics=out.get("metrics"),
+            usage=workflow_usage,
+            cost=_estimate_cost(llm_model, workflow_usage),
         )
     except Exception as e:
         logger.warning("workflow_run emit metrics failed: %s", e)
