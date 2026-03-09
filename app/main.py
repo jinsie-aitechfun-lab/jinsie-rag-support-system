@@ -1,4 +1,5 @@
 from pathlib import Path
+import logging
 import time
 from datetime import datetime, timezone
 import os
@@ -31,6 +32,7 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 
 app = FastAPI(title="Jinsie RAG Support System")
+logger = logging.getLogger(__name__)
 
 # LLMOps Backend Structure
 # - API Layer: FastAPI (app/main.py)
@@ -336,6 +338,7 @@ def workflow_run(req: WorkflowRunRequest, request: Request):
 
     retrieval_ms = _step_ms("step_1_retriever")
     llm_ms = _step_ms("step_3_llm")
+
     # 可观测：engine 灰度命中（不改 success/metrics 结构；只在 data 里追加）
     meta = out.get("meta")
     if not isinstance(meta, dict):
@@ -350,5 +353,47 @@ def workflow_run(req: WorkflowRunRequest, request: Request):
             "llm_ms": llm_ms,
         }
     )
+
+    # best-effort observability 上报：不能影响主链路
+    try:
+        workflow_usage_raw = (
+            out.get("llm_usage")
+            or meta.get("llm_usage")
+            or out.get("usage")
+            or ((out.get("answer") or {}).get("usage"))
+            or {}
+        )
+        workflow_usage = _normalize_usage(workflow_usage_raw)
+
+        llm_model = (
+            out.get("llm_model")
+            or meta.get("llm_model")
+            or ((out.get("answer") or {}).get("model"))
+            or os.getenv("OPENAI_MODEL")
+            or "unknown"
+        )
+
+        emit_metrics(
+            [
+                {
+                    "request_id": request_id,
+                    "engine": f"workflow:{engine}",
+                    "status": str(out.get("status") or "COMPLETED"),
+                    "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    "total_ms": float(out["metrics"].get("total_ms") or 0.0),
+                    "llm_ms": float(out["metrics"].get("llm_ms") or 0.0),
+                    "retrieval_ms": float(out["metrics"].get("retrieval_ms") or 0.0),
+                    "prompt_tokens": int(workflow_usage.get("prompt_tokens") or 0),
+                    "completion_tokens": int(workflow_usage.get("completion_tokens") or 0),
+                    "total_tokens": int(workflow_usage.get("total_tokens") or 0),
+                    "cost": _estimate_cost(
+                        llm_model,
+                        workflow_usage,
+                    ),
+                }
+            ]
+        )
+    except Exception as e:
+        logger.warning("workflow_run emit metrics failed: %s", e)
 
     return _ok(out, request_id=request_id)
