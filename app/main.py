@@ -113,6 +113,53 @@ def _normalize_metrics(metrics: dict | None) -> dict:
     }
 
 
+def _normalize_usage(usage: dict | None) -> dict:
+    usage = usage or {}
+
+    def _as_int(v) -> int:
+        if v is None:
+            return 0
+        try:
+            return int(v)
+        except Exception:
+            return 0
+
+    prompt_tokens = _as_int(usage.get("prompt_tokens"))
+    completion_tokens = _as_int(usage.get("completion_tokens"))
+    total_tokens = _as_int(usage.get("total_tokens"))
+
+    if total_tokens <= 0:
+        total_tokens = prompt_tokens + completion_tokens
+
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+    }
+
+
+def _estimate_cost(model: str, usage: dict) -> float:
+    """
+    Minimal cost estimator.
+    Default is 0.0 unless env prices are configured.
+
+    Env (optional):
+    - OPENAI_PRICE_INPUT_PER_1K
+    - OPENAI_PRICE_OUTPUT_PER_1K
+    """
+    try:
+        input_price_per_1k = float(os.getenv("OPENAI_PRICE_INPUT_PER_1K", "0").strip() or 0.0)
+        output_price_per_1k = float(os.getenv("OPENAI_PRICE_OUTPUT_PER_1K", "0").strip() or 0.0)
+    except Exception:
+        return 0.0
+
+    prompt_tokens = int(usage.get("prompt_tokens") or 0)
+    completion_tokens = int(usage.get("completion_tokens") or 0)
+
+    cost = (prompt_tokens / 1000.0) * input_price_per_1k + (completion_tokens / 1000.0) * output_price_per_1k
+    return round(cost, 6)
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """
@@ -130,53 +177,36 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
-    # If client provides x-request-id, keep it; otherwise generate one.
     request_id = request.headers.get("x-request-id") or str(uuid4())
-
-    detail = exc.detail
-    if isinstance(detail, dict):
-        request_id = detail.get("request_id") or request_id
-        code = detail.get("code", "HTTP_ERROR")
-        message = detail.get("message", "request failed")
-    else:
-        code = "HTTP_ERROR"
-        message = str(detail)
-
-    return JSONResponse(status_code=exc.status_code, content=_err(code, message, request_id=request_id))
+    message = str(exc.detail) if exc.detail else "http error"
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=_err("HTTP_ERROR", message, request_id=request_id),
+    )
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     request_id = request.headers.get("x-request-id") or str(uuid4())
-    # Dev 期可以把 str(exc) 暴露出去；若你希望更“企业级”，这里可改为固定文案 + 服务器端日志
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content=_err("INTERNAL_ERROR", str(exc), request_id=request_id),
+        content=_err("INTERNAL_ERROR", "internal server error", request_id=request_id),
     )
 
 
-def _platform_prompt_path() -> str:
-    """
-    Resolve the platform prompt path regardless of current working directory.
-    platform.__file__ -> .../jinsie-ai-agent-platform/jinsie_agent_platform/__init__.py
-    """
-    repo_root = Path(platform.__file__).resolve().parents[1]
-    prompt = repo_root / "app" / "prompts" / "system" / "agent_system.md"
-    return str(prompt)
+def _project_root() -> Path:
+    return Path(__file__).resolve().parent.parent
 
 
-def _augment_query_with_context(query: str, *, mode: str, top_k: int) -> tuple[str, list, str]:
+def _augment_query_with_context(query: str, *, mode: str = "keyword", top_k: int = 3):
     mode_norm = (mode or "keyword").strip().lower()
 
     if mode_norm == "vector":
         docs = vector_retrieve(query, top_k=top_k)
-        used_mode = "vector"
     else:
         docs = keyword_retrieve(query, top_k=top_k)
-        used_mode = "keyword"
 
     context = format_context(docs)
-
     if not context:
         return query, docs, ""
 
@@ -226,6 +256,11 @@ def rag_run(req: RagRunRequest):
     try:
         engine = (os.getenv("RAG_ENGINE") or "jinsie-rag-support-system").strip()
         m = data["metrics"] or {}
+        answer_obj = data.get("answer") or {}
+        model = str(answer_obj.get("model") or engine)
+        usage = _normalize_usage(answer_obj.get("usage") or {})
+        cost = _estimate_cost(model, usage)
+
         emit_metrics(
             [
                 {
@@ -235,6 +270,10 @@ def rag_run(req: RagRunRequest):
                     "retrieval_ms": float(m.get("retrieval_ms") or 0.0),
                     "engine": engine,
                     "status": "COMPLETED",
+                    "prompt_tokens": usage["prompt_tokens"],
+                    "completion_tokens": usage["completion_tokens"],
+                    "total_tokens": usage["total_tokens"],
+                    "cost": cost,
                     "timestamp": _utc_timestamp(),
                 }
             ]
